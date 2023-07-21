@@ -1,0 +1,154 @@
+---
+title: "Population change in Worcester"
+author: "Carole Voulgaris"
+date: "2023-07-21"
+output: 
+  rmdformats::downcute:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tidycensus)
+library(knitr)
+```
+
+## Population change
+
+Did the population of Worcester County
+increase a lot between 2010 and 2020? How does its increase compare
+to the increase in the Boston metropolitan area (excluding New Hampshire), and
+to the overall increase in the United States population?
+
+```{r, message=FALSE}
+census_vars_2020 <- c(popln = "P1_001N")
+census_vars_2010 <- c(popln = "P008001")
+
+msa_pops_2020 <- get_decennial(geography = "county",
+                               state = c("MA"),
+                               variables = census_vars_2020,
+                               year = 2020,
+                               output = "wide") |>
+  filter(NAME == "Worcester County, Massachusetts" |
+           NAME == "Middlesex County, Massachusetts" |
+           NAME == "Essex County, Massachusetts" |
+           NAME == "Suffolk County, Massachusetts" |
+           NAME == "Norfolk County, Massachusetts" |
+           NAME == "Plymouth County, Massachusetts") |>
+  mutate(Region = ifelse(NAME == "Worcester County, Massachusetts",
+                      "Worcester County", 
+                      "Boston metro area (Massachusetts only)")) |>
+  group_by(Region) |>
+  summarise(`2020 population` = sum(popln))
+
+msa_pops_2010 <- get_decennial(geography = "county",
+                               state = c("MA"),
+                               variables = census_vars_2010,
+                               year = 2010,
+                               output = "wide")  |>
+  filter(NAME == "Worcester County, Massachusetts" |
+           NAME == "Middlesex County, Massachusetts" |
+           NAME == "Essex County, Massachusetts" |
+           NAME == "Suffolk County, Massachusetts" |
+           NAME == "Norfolk County, Massachusetts" |
+           NAME == "Plymouth County, Massachusetts") |>
+  mutate(Region = ifelse(NAME == "Worcester County, Massachusetts",
+                      "Worcester County", 
+                      "Boston metro area (Massachusetts only)")) |>
+  group_by(Region) |>
+  summarise(`2010 population` = sum(popln))
+
+usa_pop_2010 <- get_decennial(geography = "us",
+                         variables = census_vars_2010,
+                         year = 2010,
+                         output = "wide")
+
+usa_pop_2020 <- get_decennial(geography = "us",
+                         variables = census_vars_2020,
+                         year = 2020,
+                         output = "wide")
+
+usa_row <- tibble(Region = "United States", 
+                  `2010 population` = usa_pop_2010$popln[1],
+                  `2020 population` = usa_pop_2020$popln[1])
+
+comparison <- left_join(msa_pops_2010, msa_pops_2020) |>
+  rbind(usa_row) |>
+  mutate(Increase = `2020 population` - `2010 population`) |>
+  mutate(`Percent increase` = paste0(formatC(100* Increase / `2010 population`, digits = 2), "%"))
+
+kable(comparison,
+      format.args = list(big.mark = ","), 
+      align = c("l", "r", "r", "r", "r"))
+
+```
+
+## Prevalence of movers over time
+
+One way to look at this question would be to look at how much of the 
+population of the Worcester had moved between counties, but within the same state
+during this period, and compare that to the population of inter-county movers
+in the Boston metro area. Note that for Boston, this would include moves within
+the metro area, such as moves between Suffolk county (Boston) and Middlesex county
+(Cambridge).
+
+We can get this data for both Worcester County and the Boston metro area for each year from 2010 
+to 2019.
+
+```{r, message=FALSE}
+vars_acs1 <- c(moved = "B07001_049",
+               total = "B07001_001")
+
+all_years <- tibble(Region = "none",
+                    move_pct = 0,
+                    year = 200) |>
+  filter(year ==0)
+
+for (i in 2010:2019) {
+  
+  this_year <- get_acs(geography = "county",
+                               state = c("MA"),
+                               variables = vars_acs1,
+                               year = i,
+                               output = "wide",
+                       survey = "acs1") |>
+  filter(NAME == "Worcester County, Massachusetts" |
+           NAME == "Middlesex County, Massachusetts" |
+           NAME == "Essex County, Massachusetts" |
+           NAME == "Suffolk County, Massachusetts" |
+           NAME == "Norfolk County, Massachusetts" |
+           NAME == "Plymouth County, Massachusetts") |>
+  mutate(Region = ifelse(NAME == "Worcester County, Massachusetts",
+                      "Worcester County", 
+                      "Boston metro area (Massachusetts only)")) |>
+  group_by(Region) |>
+  summarise(total = sum(totalE),
+            moved = sum(movedE)) |>
+  mutate(move_pct = 
+           moved*100/total,
+         year = i) |>
+    select(-total, -moved)
+  
+  all_years <- rbind(all_years, this_year)
+  
+}
+```
+
+Here's that data in a time series.
+
+```{r}
+ggplot(all_years) +
+  geom_line(aes(x = year, 
+                y = move_pct,
+                color = Region)) +
+  scale_x_continuous(breaks = seq(2010, 2019, by=1), name = "Year") +
+  scale_y_continuous(name = "Percent of the population that\nmoved between counties by within\nthe same state in the past year",
+                     limits = c(0, 15))
+```
+
